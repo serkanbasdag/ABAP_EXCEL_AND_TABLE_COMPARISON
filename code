@@ -1,0 +1,350 @@
+REPORT ZSERKAN_TABLE_COMPARISON.
+
+TABLES: VBAK.
+TABLES: SSCRFIELDS.
+TYPE-POOLS: TRUX.
+TYPES: BEGIN OF TY_EXCEL,
+         VBELN TYPE VBELN_VA,
+         ERDAT TYPE ERDAT,
+         ERZET TYPE ERZET,
+         ERNAM TYPE ERNAM,
+         AUDAT TYPE AUDAT,
+       END OF TY_EXCEL.
+
+DATA: BEGIN OF LT_VBAK OCCURS 0,
+        VBELN LIKE VBAK-VBELN, " vbeln_va,
+        ERDAT LIKE VBAK-ERDAT,
+        ERZET LIKE VBAK-ERZET,
+        ERNAM LIKE VBAK-ERNAM,
+        AUDAT LIKE VBAK-AUDAT,
+      END OF LT_VBAK.
+
+TYPES: BEGIN OF TY_ROWS,
+         ROW TYPE NUMC4,
+       END OF TY_ROWS.
+
+*DATA: lt_excel       TYPE TABLE OF ty_excel WITH HEADER LINE,
+DATA: LT_EXCEL       LIKE LT_VBAK OCCURS 0 WITH HEADER LINE,
+      LS_EXCEL       TYPE TY_EXCEL,
+      LS_VBAK        LIKE LT_VBAK,
+      LT_FARK        TYPE TABLE OF TY_EXCEL,
+      LT_ROWS        TYPE TABLE OF TY_ROWS,
+      LT_FILETABLE   TYPE FILETABLE,
+      LV_RETURN_CODE TYPE I,
+      LX_FILETABLE   LIKE LINE OF LT_FILETABLE,
+      LV_SUBJECT     TYPE STRING,
+      LT_TMP_EXC     TYPE TABLE OF ALSMEX_TABLINE,
+      LT_FCAT        TYPE SLIS_T_FIELDCAT_ALV WITH HEADER LINE,
+      LS_LAYO        TYPE SLIS_LAYOUT_ALV,
+      I_TAB          TYPE	TRUXS_T_TEXT_DATA.
+
+FIELD-SYMBOLS: <WA_ROW> TYPE TY_ROWS.
+
+PARAMETERS: P_FILE   TYPE LOCALFILE.
+CONSTANTS:  C_EXT_XLS TYPE STRING    VALUE '*.xls'.
+SELECTION-SCREEN FUNCTION KEY 1.
+
+INITIALIZATION.
+
+  CONCATENATE ICON_PLANNING_OUT 'Şablon İndir' INTO SSCRFIELDS-FUNCTXT_01
+   SEPARATED BY SPACE.
+
+AT SELECTION-SCREEN.
+  IF SY-UCOMM = 'FC01'.
+    PERFORM GET_DW_EXCEL.
+  ENDIF.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR P_FILE.
+
+  CALL METHOD CL_GUI_FRONTEND_SERVICES=>FILE_OPEN_DIALOG
+    EXPORTING
+      WINDOW_TITLE            = 'Excel File Upload'
+      DEFAULT_EXTENSION       = C_EXT_XLS
+    CHANGING
+      FILE_TABLE              = LT_FILETABLE
+      RC                      = LV_RETURN_CODE
+    EXCEPTIONS
+      FILE_OPEN_DIALOG_FAILED = 1
+      CNTL_ERROR              = 2
+      ERROR_NO_GUI            = 3
+      NOT_SUPPORTED_BY_GUI    = 4
+      OTHERS                  = 5.
+
+  IF SY-SUBRC <> 0.
+    MESSAGE ID SY-MSGID
+          TYPE SY-MSGTY NUMBER SY-MSGNO
+          WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+  ENDIF.
+
+  READ TABLE LT_FILETABLE INTO LX_FILETABLE INDEX 1.
+  P_FILE = LX_FILETABLE-FILENAME.
+
+
+START-OF-SELECTION.
+
+  IF P_FILE IS INITIAL.
+    MESSAGE 'Lütfen gerekli alanları doldurunuz!' TYPE 'E'.
+  ENDIF.
+*
+*  CALL FUNCTION 'TEXT_CONVERT_XLS_TO_SAP'
+*    EXPORTING
+**     I_FIELD_SEPERATOR    =
+*      i_line_header        = 'X'
+*      i_tab_raw_data       = i_tab
+*      i_filename           = p_file
+*    TABLES
+*      i_tab_converted_data = lt_excel[]
+*    EXCEPTIONS
+*      conversion_failed    = 1
+*      OTHERS               = 2.
+*  IF sy-subrc <> 0.
+** Implement suitable error handling here
+*  ENDIF.
+
+
+  CALL FUNCTION 'ALSM_EXCEL_TO_INTERNAL_TABLE'
+    EXPORTING
+      FILENAME                = P_FILE
+      I_BEGIN_COL             = 1
+      I_BEGIN_ROW             = 2
+      I_END_COL               = 1000
+      I_END_ROW               = 1000
+    TABLES
+      INTERN                  = LT_TMP_EXC[]
+    EXCEPTIONS
+      INCONSISTENT_PARAMETERS = 1
+      UPLOAD_OLE              = 2
+      OTHERS                  = 3.
+  IF LINES( LT_TMP_EXC ) > 0.
+
+    DATA: WA_TMP_EXCEL TYPE ALSMEX_TABLINE,
+          LV_LENGHT    TYPE I.
+    MOVE-CORRESPONDING LT_TMP_EXC TO LT_ROWS.
+    SORT LT_ROWS BY ROW.
+    DELETE ADJACENT DUPLICATES FROM LT_ROWS COMPARING ROW.
+    LOOP AT LT_ROWS ASSIGNING <WA_ROW>.
+      CLEAR : LS_EXCEL , WA_TMP_EXCEL.
+
+      LOOP AT LT_TMP_EXC INTO WA_TMP_EXCEL
+        WHERE ROW EQ <WA_ROW>-ROW.
+        IF WA_TMP_EXCEL-COL EQ 1.
+
+          LS_EXCEL-VBELN = WA_TMP_EXCEL-VALUE.
+
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+            EXPORTING
+              INPUT  = LS_EXCEL-VBELN
+            IMPORTING
+              OUTPUT = LS_EXCEL-VBELN.
+
+          CLEAR WA_TMP_EXCEL-VALUE.
+
+        ELSEIF WA_TMP_EXCEL-COL EQ 2.
+          LV_LENGHT = STRLEN( WA_TMP_EXCEL-VALUE ).
+          IF LV_LENGHT NE 10.
+            CONCATENATE '0' WA_TMP_EXCEL-VALUE INTO WA_TMP_EXCEL-VALUE.
+          ENDIF.
+          CONCATENATE WA_TMP_EXCEL-VALUE+6(4)
+                      WA_TMP_EXCEL-VALUE+3(2)
+                      WA_TMP_EXCEL-VALUE+0(2)
+                 INTO WA_TMP_EXCEL-VALUE.
+          LS_EXCEL-ERDAT = WA_TMP_EXCEL-VALUE.
+          CLEAR WA_TMP_EXCEL-VALUE.
+
+
+        ELSEIF WA_TMP_EXCEL-COL EQ 3.
+          LS_EXCEL-ERZET = WA_TMP_EXCEL-VALUE.
+          CLEAR WA_TMP_EXCEL-VALUE.
+
+        ELSEIF WA_TMP_EXCEL-COL EQ 4.
+          LS_EXCEL-ERNAM = WA_TMP_EXCEL-VALUE.
+
+          CLEAR WA_TMP_EXCEL-VALUE.
+
+        ELSEIF WA_TMP_EXCEL-COL EQ 5.
+          LV_LENGHT = STRLEN( WA_TMP_EXCEL-VALUE ).
+          IF LV_LENGHT NE 10.
+            CONCATENATE '0' WA_TMP_EXCEL-VALUE INTO WA_TMP_EXCEL-VALUE.
+          ENDIF.
+          CONCATENATE WA_TMP_EXCEL-VALUE+6(4)
+                      WA_TMP_EXCEL-VALUE+3(2)
+                      WA_TMP_EXCEL-VALUE+0(2)
+                 INTO WA_TMP_EXCEL-VALUE.
+          LS_EXCEL-AUDAT = WA_TMP_EXCEL-VALUE.
+          CLEAR WA_TMP_EXCEL-VALUE.
+
+        ENDIF.
+      ENDLOOP.
+
+      APPEND LS_EXCEL TO LT_EXCEL.
+    ENDLOOP.
+
+  ENDIF.
+
+
+  PERFORM GET_PROCESS.
+  PERFORM BUILD_FIELD_CATALOG.
+  PERFORM BUILD_LAYOUT.
+  PERFORM DISPLAY_ALV_REPORT.
+
+
+
+FORM BUILD_FIELD_CATALOG .
+
+  LT_FCAT-FIELDNAME   = 'VBELN'.
+  LT_FCAT-SELTEXT_M   = 'Satış belgesi'.
+  APPEND LT_FCAT TO LT_FCAT.
+  CLEAR LT_FCAT.
+
+  LT_FCAT-FIELDNAME   = 'ERDAT'.
+  LT_FCAT-SELTEXT_M   = 'Kaydın yaratıldığı tarih'.
+  APPEND LT_FCAT TO LT_FCAT.
+  CLEAR LT_FCAT.
+
+  LT_FCAT-FIELDNAME   = 'ERZET'.
+  LT_FCAT-SELTEXT_M   = 'Giriş saati'.
+  APPEND LT_FCAT TO LT_FCAT.
+  CLEAR LT_FCAT.
+
+  LT_FCAT-FIELDNAME   = 'ERNAM'.
+  LT_FCAT-SELTEXT_M   = 'Kullanıcı adı'.
+  APPEND LT_FCAT TO LT_FCAT.
+  CLEAR LT_FCAT.
+
+  LT_FCAT-FIELDNAME   = 'AUDAT'.
+  LT_FCAT-SELTEXT_M   = 'Belge tarihi '.
+  APPEND LT_FCAT TO LT_FCAT.
+  CLEAR LT_FCAT.
+ENDFORM.
+
+FORM BUILD_LAYOUT.
+  LS_LAYO-ZEBRA             = 'X'.
+  LS_LAYO-NO_INPUT          = 'X'.
+  LS_LAYO-COLWIDTH_OPTIMIZE = 'X'.
+  LS_LAYO-TOTALS_TEXT       = 'Totals'(201).
+ENDFORM.
+
+FORM SET_PF_STATUS USING RT_EXTAB TYPE SLIS_T_EXTAB.
+  SET PF-STATUS 'PF_001' EXCLUDING RT_EXTAB .
+  SET TITLEBAR 'TITLE'.
+ENDFORM.
+
+FORM DISPLAY_ALV_REPORT .
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      I_CALLBACK_PROGRAM       = SY-REPID
+      IS_LAYOUT                = LS_LAYO
+      I_CALLBACK_PF_STATUS_SET = 'SET_PF_STATUS'
+      IT_FIELDCAT              = LT_FCAT[]
+*     i_callback_user_command  = 'USER_COMMAND'
+      I_SAVE                   = 'X'
+    TABLES
+      T_OUTTAB                 = LT_FARK
+    EXCEPTIONS
+      PROGRAM_ERROR            = 1
+      OTHERS                   = 2.
+  IF SY-SUBRC <> 0.
+  ENDIF.
+ENDFORM.
+
+FORM PF_STATUS USING  RT_EXTAB  TYPE  SLIS_T_EXTAB.
+  SET PF-STATUS 'PF_001'.
+ENDFORM.
+
+FORM GET_PROCESS.
+
+  SELECT * FROM VBAK INTO CORRESPONDING FIELDS OF TABLE LT_VBAK UP TO 3 ROWS.
+
+  LOOP AT LT_VBAK.
+    READ TABLE LT_EXCEL INTO LS_EXCEL WITH KEY VBELN = LT_VBAK-VBELN
+                                               ERDAT = LT_VBAK-ERDAT
+                                               ERZET = LT_VBAK-ERZET
+                                               ERNAM = LT_VBAK-ERNAM
+                                               AUDAT = LT_VBAK-AUDAT.
+    IF SY-SUBRC NE 0.
+      APPEND LT_VBAK TO LT_FARK.
+    ENDIF.
+  ENDLOOP.
+
+  LOOP AT LT_EXCEL.
+    READ TABLE LT_VBAK INTO LS_VBAK WITH KEY VBELN = LT_EXCEL-VBELN
+                                              ERDAT = LT_EXCEL-ERDAT
+                                              ERZET = LT_EXCEL-ERZET
+                                              ERNAM = LT_EXCEL-ERNAM
+                                              AUDAT = LT_EXCEL-AUDAT.
+    IF SY-SUBRC NE 0.
+      APPEND LT_EXCEL TO LT_FARK.
+    ENDIF.
+  ENDLOOP.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  GET_DW_EXCEL
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM GET_DW_EXCEL .
+
+  DATA:LV_FILENAME TYPE STRING,
+       LV_PATH     TYPE STRING,
+       LV_FULLPATH TYPE STRING.
+
+  DATA : BEGIN OF IT_JOIN_FIELDS OCCURS 0,
+           FIELD_NAME_VBELN(20),
+           FIELD_NAME_ERDAT(20),
+           FIELD_NAME_ERZET(20),
+           FIELD_NAME_ERNAM(20),
+           FIELD_NAME_AUDAT(20),
+         END OF IT_JOIN_FIELDS.
+
+  CLEAR IT_JOIN_FIELDS.
+
+  IT_JOIN_FIELDS-FIELD_NAME_VBELN = 'Satış belgesi'.
+  IT_JOIN_FIELDS-FIELD_NAME_ERDAT = 'Kaydın yaratıldığı tarih'.
+  IT_JOIN_FIELDS-FIELD_NAME_ERZET = 'Giriş saati'.
+  IT_JOIN_FIELDS-FIELD_NAME_ERNAM = 'Kullanıcı adı'.
+  IT_JOIN_FIELDS-FIELD_NAME_AUDAT = 'Belge tarihi'.
+  APPEND IT_JOIN_FIELDS.
+  CLEAR IT_JOIN_FIELDS.
+
+
+  CALL METHOD CL_GUI_FRONTEND_SERVICES=>FILE_SAVE_DIALOG
+    EXPORTING
+      WINDOW_TITLE         = 'Dosya Kayıt Yolu Seçiniz'
+      DEFAULT_EXTENSION    = 'XLS'
+      FILE_FILTER          = 'Excel files (*.XLS)|*.XLS'
+    CHANGING
+      FILENAME             = LV_FILENAME
+      PATH                 = LV_PATH
+      FULLPATH             = LV_FULLPATH
+    EXCEPTIONS
+      CNTL_ERROR           = 1
+      ERROR_NO_GUI         = 2
+      NOT_SUPPORTED_BY_GUI = 3
+      OTHERS               = 4.
+  IF SY-SUBRC <> 0.
+    MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+          WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+    EXIT.
+  ENDIF.
+
+  IF LV_FULLPATH IS INITIAL .
+    EXIT.
+  ENDIF.
+
+  CALL FUNCTION 'GUI_DOWNLOAD'
+    EXPORTING
+      FILENAME              = LV_FILENAME
+      FILETYPE              = 'ASC'
+      WRITE_FIELD_SEPARATOR = 'X'
+    TABLES
+      DATA_TAB              = IT_JOIN_FIELDS.
+  IF SY-SUBRC <> 0.
+  ENDIF.
+
+
+ENDFORM.
